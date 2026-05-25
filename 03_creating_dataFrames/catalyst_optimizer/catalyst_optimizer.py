@@ -226,7 +226,8 @@ employees_df.write.mode("overwrite").parquet(parquet_path)
 
 parquet_employees_df = spark.read.parquet(parquet_path)
 
-predicate_df = parquet_employees_df.filter(col("salary") > 70000)
+predicate_df = parquet_employees_df.select("emp_id", "salary").\
+    filter(col("salary") > 70000)
 
 print("\nEmployees with salary > 70000")
 predicate_df.show()
@@ -547,5 +548,117 @@ Very Important Line:
 Logical Plan = What needs to be done
 Physical Plan = How Spark will do it
 """)
+
+# ============================================================
+# One Logical Plan, Multiple Possible Physical Plans
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Create sample DataFrames
+# ------------------------------------------------------------
+
+employees_data = [
+    (1, "Sandeep", 10, 90000),
+    (2, "Rahul", 10, 70000),
+    (3, "Priya", 20, 60000),
+    (4, "Amit", 30, 80000),
+    (5, "Sneha", 30, 95000),
+    (6, "John", 10, 120000),
+]
+
+departments_data = [
+    (10, "Engineering"),
+    (20, "HR"),
+    (30, "Finance"),
+]
+
+employees_df = spark.createDataFrame(
+    employees_data,
+    ["emp_id", "emp_name", "dept_id", "salary"]
+)
+
+departments_df = spark.createDataFrame(
+    departments_data,
+    ["dept_id", "dept_name"]
+)
+
+# ============================================================
+# CASE 1: Normal Join
+# ============================================================
+# Logical operation:
+# employees JOIN departments ON dept_id
+#
+# Spark will choose a physical join strategy.
+# Depending on configuration/statistics, it may choose SortMergeJoin
+# or BroadcastHashJoin.
+
+print("\n" + "=" * 80)
+print("CASE 1: Normal Join")
+print("=" * 80)
+
+normal_join_df = employees_df.join(
+    departments_df,
+    on="dept_id",
+    how="inner"
+)
+
+normal_join_df.show()
+
+print("\nPlan for Normal Join")
+normal_join_df.explain(True)
+
+
+# ============================================================
+# CASE 2: Force Broadcast Join
+# ============================================================
+# Logical operation is still the same:
+# employees JOIN departments ON dept_id
+#
+# But now we are giving Spark a broadcast hint.
+# Spark will most likely choose BroadcastHashJoin.
+
+print("\n" + "=" * 80)
+print("CASE 2: Broadcast Join using Hint")
+print("=" * 80)
+
+broadcast_join_df = employees_df.join(
+    broadcast(departments_df),
+    on="dept_id",
+    how="inner"
+)
+
+broadcast_join_df.show()
+
+print("\nPlan for Broadcast Join")
+broadcast_join_df.explain(True)
+
+
+# ============================================================
+# CASE 3: Disable Broadcast Join
+# ============================================================
+# Logical operation is still the same:
+# employees JOIN departments ON dept_id
+#
+# Here we disable automatic broadcast joins by setting threshold to -1.
+# Now Spark cannot use automatic broadcast join.
+# It will usually choose SortMergeJoin for equi-join.
+
+print("\n" + "=" * 80)
+print("CASE 3: Broadcast Disabled")
+print("=" * 80)
+
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
+
+no_broadcast_join_df = employees_df.join(
+    departments_df,
+    on="dept_id",
+    how="inner"
+)
+
+no_broadcast_join_df.show()
+
+print("\nPlan when Broadcast Join is Disabled")
+no_broadcast_join_df.explain(True)
 
 spark.stop()

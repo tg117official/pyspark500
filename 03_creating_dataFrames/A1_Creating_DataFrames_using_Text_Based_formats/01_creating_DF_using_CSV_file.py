@@ -10,7 +10,7 @@ spark = SparkSession.builder \
 # Read the employee data from a CSV file into a DataFrame
 # Replace '<path to employee.csv>' with the actual path to your CSV file
 employeeDF = spark.read.option("inferSchema", "true").\
-    option("header", "true").csv("data/employee.txt")
+    option("header", "true").csv(r"data/employee.txt")
 
 # Print the inferred schema of the DataFrame to show the data types and structure
 employeeDF.printSchema()

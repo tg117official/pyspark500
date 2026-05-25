@@ -26,7 +26,7 @@ emp_schema = StructType([
 #Alternate Way to create schema
 emp_schema_2 = StructType().\
     add("eid", IntegerType(), True).\
-    add("ename", StringType(), True).\
+    add("emp_name", StringType(), True).\
     add("dept", StringType(), True).\
     add("salary", DoubleType(), True).\
     add("date_of_joining", StringType(), True)
@@ -34,7 +34,7 @@ emp_schema_2 = StructType().\
 
 # Read the employee data from a CSV file into a DataFrame using the defined schema
 # Replace '<path to employee.csv>' with the actual path to your CSV file
-empDF = spark.read.option("header", "true").schema(emp_schema).csv("data/employee.txt")
+empDF = spark.read.option("header", "true").schema(emp_schema_2).csv("data/employee.txt")
 
 # Print the schema of the DataFrame to show the data types and structure
 empDF.printSchema()

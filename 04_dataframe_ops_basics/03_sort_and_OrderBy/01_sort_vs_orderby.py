@@ -56,15 +56,21 @@ df.orderBy(length(col("ename")).desc()).show()
 # SQL Equivalent
 spark.sql("SELECT * FROM employee ORDER BY LENGTH(ename) DESC").show()
 
+df = spark.read.csv("data\employee_with_nulls.csv", header=True, inferSchema=True)
+
+# Register the DataFrame as a temporary view to use SQL
+df.createOrReplaceTempView("employee_nulls")
+
+
 # Use Case 7: Case-Insensitive Sorting
-df.orderBy(col("ename").asc_nulls_last()).show()
+df.orderBy(col("salary").asc_nulls_last()).show()
 # SQL Equivalent
 spark.sql("SELECT * FROM employee ORDER BY ename ASC NULLS LAST").show()
 
-df.orderBy(col("ename").desc_nulls_first()).show()
+df.orderBy(col("salary").desc_nulls_first()).show()
 
 # Use Case 8: Sorting with Null Values at the End
-df.sort(col("date_of_joining").asc_nulls_last()).show()
+df.sort(col("salary").asc_nulls_last()).show()
 # SQL Equivalent
 spark.sql("SELECT * FROM employee ORDER BY date_of_joining ASC NULLS LAST").show()
 

@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, year, current_date, month, expr, lit
+from pyspark.sql.functions import col, when, expr, year, current_date, month, expr, lit
 
 from pyspark import StorageLevel
 
@@ -7,9 +7,6 @@ from pyspark import StorageLevel
 spark = SparkSession.builder.appName("AdvancedDataManipulation").enableHiveSupport().getOrCreate()
 
 sc = spark.sparkContext
-
-dataRDD = sc.textFile()
-dataRDD = spark.sparkContext.textFile()
 
 df = spark.read.csv("data/employee.csv", header=True, inferSchema=True)
 
@@ -21,6 +18,13 @@ df = df.withColumn("salary_range",
                     when(col("salary") < 50000, "Low")
                    .when(col("salary") <= 100000, "Medium")
                    .otherwise("High"))
+
+df = df.withColumn("salary_range", expr("""CASE
+    WHEN salary < 50000 THEN 'Low'
+    WHEN salary <= 100000 THEN 'Medium'
+    ELSE 'High'
+END as salary_range"""))
+
 spark.sql("""
 SELECT *, CASE 
     WHEN salary < 50000 THEN 'Low'

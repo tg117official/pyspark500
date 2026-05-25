@@ -51,4 +51,4 @@ df.show()
 spark.stop()
 
 # To run this code in pyspark shell, start pyspark shell with following command
-# pyspark --packages org.apache.spark:spark-avro_2.12:3.4.3,
+# pyspark --packages org.apache.spark:spark-avro_2.12:3.4.3
