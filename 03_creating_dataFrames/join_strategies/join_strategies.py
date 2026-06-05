@@ -68,10 +68,8 @@ def print_heading(title):
 
 def show_and_explain(df, title, n=20):
     print_heading(title)
-
     print("\nResult:")
     df.show(n, truncate=False)
-
     print("\nDetailed Execution Plan:")
     df.explain(True)
 
@@ -86,11 +84,9 @@ def show_and_explain(df, title, n=20):
 # broadcast joins unless we explicitly use broadcast() or BROADCAST hint.
 
 print_heading("INITIAL CONFIGURATION")
-
 spark.conf.set("spark.sql.adaptive.enabled", "false")
 spark.conf.set("spark.sql.shuffle.partitions", "4")
 spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
-
 print("AQE Enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
 print("Shuffle Partitions:", spark.conf.get("spark.sql.shuffle.partitions"))
 print("Auto Broadcast Join Threshold:", spark.conf.get("spark.sql.autoBroadcastJoinThreshold"))
@@ -648,4 +644,295 @@ BroadcastExchange
 Exchange hashpartitioning
 LeftSemi
 LeftAnti
+""")
+
+
+# ============================================================
+# AQE Demo: Dynamic Join Strategy Selection
+# With AQE Disabled vs AQE Enabled
+# ============================================================
+#
+# Objective:
+# Demonstrate how AQE can dynamically change join strategy
+# from SortMergeJoin to BroadcastHashJoin at runtime.
+#
+# Case 1: AQE Disabled
+# - Static broadcast disabled.
+# - Spark should use SortMergeJoin.
+# - Spark will not change the strategy at runtime.
+#
+# Case 2: AQE Enabled
+# - Static broadcast disabled.
+# - Adaptive broadcast enabled.
+# - Spark may initially plan SortMergeJoin.
+# - During execution, AQE may discover small join side.
+# - Final adaptive plan may become BroadcastHashJoin.
+#
+# Run this in PySpark shell.
+# spark and sc are already available.
+# ============================================================
+
+from pyspark.sql.functions import col, rand, when, lit
+import time
+
+
+# ------------------------------------------------------------
+# Helper function: print clean headings
+# ------------------------------------------------------------
+
+def print_heading(title):
+    print("\n" + "=" * 100)
+    print(title)
+    print("=" * 100)
+
+
+# ------------------------------------------------------------
+# Helper function: measure execution time
+# ------------------------------------------------------------
+
+def measure_time(label, action_func):
+    start_time = time.time()
+    result = action_func()
+    end_time = time.time()
+
+    print("\n" + "-" * 80)
+    print(label)
+    print("Result:", result)
+    print("Time Taken:", round(end_time - start_time, 2), "seconds")
+    print("-" * 80)
+
+    return result
+
+
+# ------------------------------------------------------------
+# Helper function: create sample DataFrames
+# ------------------------------------------------------------
+# Purpose:
+# We create the same kind of data for both cases.
+#
+# orders_df:
+# Large fact-like DataFrame.
+#
+# customers_df:
+# Small dimension-like DataFrame.
+#
+# The customer side is small enough to be broadcast by AQE.
+
+def create_join_data():
+    orders_df = (
+        spark.range(0, 1_000_000)
+        .withColumn("customer_id", col("id") % 1000)
+        .withColumn("amount", rand() * 1000)
+        .repartition(20, "customer_id")
+    )
+
+    customers_df = (
+        spark.range(0, 1000)
+        .withColumnRenamed("id", "customer_id")
+        .withColumn(
+            "customer_type",
+            when(col("customer_id") % 2 == 0, lit("Premium")).otherwise(lit("Regular"))
+        )
+    )
+
+    return orders_df, customers_df
+
+
+# ============================================================
+# Initial Information
+# ============================================================
+
+print_heading("INITIAL INFORMATION")
+
+print("Spark UI:", spark.sparkContext.uiWebUrl)
+print("Spark Version:", spark.version)
+
+print("""
+Important Idea:
+
+Without AQE:
+Spark uses the physical plan selected before execution.
+
+With AQE:
+Spark can use runtime statistics and change the physical plan.
+
+In this demo:
+- Static broadcast is disabled.
+- Without AQE, Spark should continue with SortMergeJoin.
+- With AQE, Spark may convert SortMergeJoin to BroadcastHashJoin.
+""")
+
+
+# ============================================================
+# CASE 1: AQE Disabled
+# ============================================================
+# Purpose:
+# Show that when AQE is disabled, Spark does not dynamically change
+# the join strategy during execution.
+#
+# Configuration:
+# spark.sql.adaptive.enabled = false
+# spark.sql.autoBroadcastJoinThreshold = -1
+#
+# Meaning:
+# - AQE is disabled.
+# - Static broadcast join is disabled.
+# - Spark is expected to use SortMergeJoin for this equi-join.
+
+print_heading("CASE 1: AQE Disabled - Static SortMergeJoin")
+
+spark.conf.set("spark.sql.adaptive.enabled", "false")
+spark.conf.set("spark.sql.shuffle.partitions", "20")
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
+
+print("AQE Enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
+print("Shuffle Partitions:", spark.conf.get("spark.sql.shuffle.partitions"))
+print("Static Broadcast Threshold:", spark.conf.get("spark.sql.autoBroadcastJoinThreshold"))
+
+orders_no_aqe, customers_no_aqe = create_join_data()
+
+join_no_aqe = orders_no_aqe.join(
+    customers_no_aqe,
+    on="customer_id",
+    how="inner"
+)
+
+print("\nPhysical Plan BEFORE Action - AQE Disabled:")
+join_no_aqe.explain(True)
+
+measure_time(
+    "AQE Disabled - Join Count",
+    lambda: join_no_aqe.count()
+)
+
+print("\nPhysical Plan AFTER Action - AQE Disabled:")
+join_no_aqe.explain(True)
+
+print("""
+Observation:
+
+Because AQE is disabled:
+- Spark will not adapt the join strategy at runtime.
+- Since static broadcast is disabled, Spark should use a shuffle-based join.
+- Physical plan should commonly show SortMergeJoin.
+
+Look for:
+SortMergeJoin
+Exchange hashpartitioning
+""")
+
+
+# ============================================================
+# CASE 2: AQE Enabled
+# ============================================================
+# Purpose:
+# Show that when AQE is enabled, Spark can dynamically change
+# the join strategy using runtime statistics.
+#
+# Configuration:
+# spark.sql.adaptive.enabled = true
+# spark.sql.autoBroadcastJoinThreshold = -1
+# spark.sql.adaptive.autoBroadcastJoinThreshold = 20MB
+#
+# Meaning:
+# - Static broadcast is disabled.
+# - Initial plan may use SortMergeJoin.
+# - AQE can still broadcast a small side at runtime.
+#
+# Expected:
+# Initial plan may show SortMergeJoin.
+# Final adaptive plan may show BroadcastHashJoin.
+
+print_heading("CASE 2: AQE Enabled - Runtime Conversion to BroadcastHashJoin")
+
+spark.conf.set("spark.sql.adaptive.enabled", "true")
+spark.conf.set("spark.sql.shuffle.partitions", "20")
+
+# Disable normal/static broadcast planning
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
+
+# Enable adaptive broadcast at runtime
+spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "20MB")
+
+# Helps after AQE converts shuffle join to broadcast join
+spark.conf.set("spark.sql.adaptive.localShuffleReader.enabled", "true")
+
+print("AQE Enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
+print("Shuffle Partitions:", spark.conf.get("spark.sql.shuffle.partitions"))
+print("Static Broadcast Threshold:", spark.conf.get("spark.sql.autoBroadcastJoinThreshold"))
+print("Adaptive Broadcast Threshold:", spark.conf.get("spark.sql.adaptive.autoBroadcastJoinThreshold"))
+print("Local Shuffle Reader Enabled:", spark.conf.get("spark.sql.adaptive.localShuffleReader.enabled"))
+
+orders_aqe, customers_aqe = create_join_data()
+
+join_aqe = orders_aqe.join(
+    customers_aqe,
+    on="customer_id",
+    how="inner"
+)
+
+print("\nPhysical Plan BEFORE Action - AQE Enabled:")
+join_aqe.explain(True)
+
+measure_time(
+    "AQE Enabled - Join Count",
+    lambda: join_aqe.count()
+)
+
+print("\nPhysical Plan AFTER Action - AQE Enabled:")
+join_aqe.explain(True)
+
+print("""
+Observation:
+
+Because AQE is enabled:
+- Spark creates an initial plan.
+- During execution, Spark collects runtime statistics.
+- If one join side is small enough, AQE can convert SortMergeJoin to BroadcastHashJoin.
+
+Look for:
+AdaptiveSparkPlan
+SortMergeJoin in initial plan
+BroadcastHashJoin in final plan
+BroadcastExchange
+AQEShuffleRead
+LocalShuffleReader
+
+Important:
+The final result is the same.
+Only the physical execution strategy changes.
+""")
+
+
+# ============================================================
+# CASE 3: Side-by-Side Summary
+# ============================================================
+
+print_heading("SIDE-BY-SIDE SUMMARY")
+
+print("""
+AQE Disabled:
+
+1. Static broadcast threshold is disabled.
+2. AQE is disabled.
+3. Spark chooses a static physical plan before execution.
+4. The join commonly remains SortMergeJoin.
+5. Runtime statistics cannot change the join strategy.
+
+AQE Enabled:
+
+1. Static broadcast threshold is disabled.
+2. Adaptive broadcast threshold is enabled.
+3. Spark may initially plan SortMergeJoin.
+4. During execution, AQE observes that customers_df is small.
+5. AQE may convert the join to BroadcastHashJoin.
+6. This can reduce unnecessary shuffle/sort work.
+
+Core Learning:
+
+Without AQE:
+Plan is mostly fixed before execution.
+
+With AQE:
+Plan can change during execution using runtime statistics.
 """)
