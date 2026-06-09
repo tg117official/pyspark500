@@ -57,10 +57,8 @@ def print_heading(title):
 
 def inspect_partition_counts(df, title):
     print_heading(title)
-
     print("\nTotal partitions:")
     print(df.rdd.getNumPartitions())
-
     partition_counts = (
         df
         .withColumn("partition_id", spark_partition_id())
@@ -68,7 +66,6 @@ def inspect_partition_counts(df, title):
         .agg(count("*").alias("record_count"))
         .orderBy("partition_id")
     )
-
     print("\nRecords per partition:")
     partition_counts.show(200, truncate=False)
 
@@ -83,7 +80,6 @@ def inspect_partition_counts(df, title):
 
 def inspect_partition_content(df, title):
     print_heading(title)
-
     partition_data = (
         df.rdd
         .mapPartitionsWithIndex(
@@ -91,7 +87,6 @@ def inspect_partition_content(df, title):
         )
         .collect()
     )
-
     for pid, records in partition_data:
         if records:
             print(f"Partition {pid}: {records}")
@@ -114,13 +109,11 @@ def count_part_files(path):
     if not os.path.exists(path):
         print("Path does not exist:", path)
         return
-
     part_files = []
     for root, dirs, files in os.walk(path):
         for f in files:
             if f.startswith("part-"):
                 part_files.append(os.path.join(root, f))
-
     print("Part file count:", len(part_files))
     for f in part_files:
         print(f)
@@ -444,7 +437,7 @@ print_heading("EXERCISE 8: Output File Count without coalesce()")
 ex8_path = "/tmp/parallelism_demo_without_coalesce"
 
 if os.path.exists(ex8_path):
-    shutil.rmtree(ex8_path)
+1    shutil.rmtree(ex8_path)
 
 ex8_df = (
     spark.range(0, 100, 1, 10)
